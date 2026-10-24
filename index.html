@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Imposter</title>
+<style>
+:root{--bg:#f2f2f7;--card:#fff;--tx:#111;--mut:#6c6c70;--ac:#0a84ff;--bad:#ff453a;--line:#e5e5ea;--r:16px}
+@media(prefers-color-scheme:dark){:root{--bg:#000;--card:#1c1c1e;--tx:#f5f5f7;--mut:#98989f;--line:#2c2c2e}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--tx);font:17px/1.35 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,Roboto,sans-serif}
+#app{max-width:480px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;gap:14px;padding:calc(env(safe-area-inset-top,0px) + 16px) 16px calc(env(safe-area-inset-bottom,0px) + 24px)}
+h1{margin:0;font-size:44px;font-weight:800}
+p{margin:6px 0}
+.mut{color:var(--mut)}.c{text-align:center}
+.card{background:var(--card);border-radius:var(--r);padding:16px}
+.card .btn{margin-top:12px}
+.h{font-weight:600;margin-bottom:4px}
+.btn{display:flex;align-items:center;justify-content:center;width:100%;min-height:56px;border:0;border-radius:var(--r);background:var(--ac);color:#fff;font-weight:600;font-size:17px;font-family:inherit;cursor:pointer}
+.btn.sec{background:var(--card);color:var(--ac)}
+.btn:disabled{opacity:.4}.btn:active:not(:disabled){transform:scale(.98)}
+.btn.sm{min-height:40px;width:auto;padding:0 16px;font-size:15px}
+input{width:100%;min-height:52px;margin-top:10px;padding:0 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--tx);font-size:17px;font-family:inherit}
+.top{display:flex;justify-content:space-between;align-items:center}
+.code{font-size:20px;letter-spacing:.12em}
+.item{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.item:first-of-type{border-top:0}
+.badge{background:#ff9f0a;color:#000;font-size:12px;font-weight:700;border-radius:999px;padding:3px 9px}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.seg button{min-height:52px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--tx);font-size:16px;font-family:inherit}
+.seg .on,.opt.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.opt{display:flex;justify-content:space-between;align-items:center;width:100%;min-height:56px;margin-top:8px;padding:0 16px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--tx);font-size:17px;font-family:inherit}
+.flip{width:100%;min-height:300px;border:0;border-radius:24px;background:var(--card);color:var(--tx);padding:24px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;font-family:inherit}
+.flip.imp{background:rgba(255,69,58,.18)}
+.big{font-size:28px;font-weight:700}.huge{font-size:40px;font-weight:800}.val{font-size:22px;font-weight:600}
+.lbl{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);margin-top:10px}
+.tag{font-size:13px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em}
+.tag.bad{color:var(--bad)}
+.err{background:rgba(255,69,58,.15);color:var(--bad);padding:12px;border-radius:12px;font-size:15px}
+.tl{margin-top:12px}.tl div:first-child{display:flex;justify-content:space-between;margin-bottom:4px}
+.bar{height:10px;min-width:4px;border-radius:5px;background:var(--ac)}
+.foot{margin-top:auto;display:flex;flex-direction:column;gap:6px;padding-top:8px}
+.link{background:none;border:0;color:var(--bad);font-size:16px;min-height:44px;font-family:inherit}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const sb = supabase.createClient('https://kqbfoqliwslltdsldqsf.supabase.co', 'sb_publishable_H82etO6HgXd09850N4Fd7g_1LkGWX9m');
+const app = document.getElementById('app');
+const CATS = ['Movie', 'Anime', 'Superhero', 'Series'];
+const ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const rnd = a => a[Math.floor(Math.random() * a.length)];
+const wait = ms => new Promise(r => setTimeout(r, ms));
+const clone = o => JSON.parse(JSON.stringify(o));
+const mk = (name, isHost) => ({ name, isHost, role: 'crewmate', vote: '' });
+
+let me = null, room = null, chan = null, err = '', busy = false;
+try { me = JSON.parse(localStorage.getItem('imp') || 'null'); } catch {}
+const ui = { nm: '', cd: '', cat: '', chr: '', sel: '', revealed: false, left: 0, tm: null, key: '', copied: false };
+
+/* ---------- data ---------- */
+async function fetchRoom(code) {
+  const { data, error } = await sb.from('rooms').select('*').eq('id', code).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+// read-modify-write with a verify step, since players is one jsonb blob
+async function mutate(fn, ok) {
+  for (let i = 0; i < 5; i++) {
+    const r = await fetchRoom(me.code);
+    if (!r) throw Error('Room not found');
+    const patch = fn(clone(r));
+    if (!patch) { setRoom(r); return; }
+    const { data, error } = await sb.from('rooms').update(patch).eq('id', r.id).select().single();
+    if (error) throw error;
+    if (!ok) { setRoom(data); return; }
+    await wait(350 + Math.random() * 200);
+    const c = await fetchRoom(me.code);
+    if (c && ok(c)) { setRoom(c); return; }
+  }
+  throw Error('Connection busy — try again');
+}
+
+async function refresh(silent) {
+  if (!me) return;
+  const r = await fetchRoom(me.code);
+  if (!r) return out('Room closed.');
+  if (!silent || JSON.stringify(r) !== JSON.stringify(room)) setRoom(r);
+}
+
+function setRoom(r) {
+  room = r; render();
+  if (me && r && !r.players.some(p => p.name === me.name)) {
+    setTimeout(async () => {
+      try {
+        const x = await fetchRoom(me.code);
+        if (!x) return out('Room closed.');
+        if (!x.players.some(p => p.name === me.name)) out('You’re no longer in this room.');
+      } catch {}
+    }, 1200);
+  }
+}
+
+function out(msg) {
+  if (chan) { sb.removeChannel(chan); chan = null; }
+  clearInterval(ui.tm); ui.revealed = false;
+  me = null; room = null; localStorage.removeItem('imp');
+  err = msg || ''; render();
+}
+
+function sub() {
+  if (chan) sb.removeChannel(chan);
+  chan = sb.channel('room-' + me.code)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: 'id=eq.' + me.code }, p => {
+      if (p.eventType === 'DELETE') return out('Room closed.');
+      setRoom(p.new);
+    })
+    .subscribe(s => { if (s === 'SUBSCRIBED') refresh(true).catch(() => {}); });
+}
+
+/* ---------- join / leave ---------- */
+async function join(name, code, create) {
+  name = (name || '').trim().slice(0, 16);
+  code = (code || '').trim().toUpperCase();
+  if (!name) throw Error('Enter a username');
+  if (create) {
+    for (let i = 0; ; i++) {
+      code = Array.from({ length: 6 }, () => ALPHA[Math.random() * ALPHA.length | 0]).join('');
+      const { error } = await sb.from('rooms').insert({
+        id: code, phase: 'lobby', host_name: name, imposter_name: '', category: '', character: '',
+        players: [mk(name, true)], round: 1
+      });
+      if (!error) break;
+      if (error.code !== '23505' || i > 4) throw error;
+    }
+    me = { name, code };
+  } else {
+    if (code.length !== 6) throw Error('Room codes are 6 characters');
+    const r = await fetchRoom(code);
+    if (!r) throw Error('Room not found');
+    const ex = r.players.find(p => p.name.toLowerCase() === name.toLowerCase());
+    if (ex) name = ex.name;
+    else if (r.phase !== 'lobby') throw Error('That game has already started');
+    else if (r.players.length >= 10) throw Error('Room is full');
+    me = { name, code };
+    if (!ex) {
+      try {
+        await mutate(
+          x => (x.phase !== 'lobby' || x.players.some(p => p.name === name)) ? null : { players: [...x.players, mk(name, false)] },
+          x => x.players.some(p => p.name === name)
+        );
+      } catch (e) { me = null; throw e; }
+    }
+  }
+  localStorage.setItem('imp', JSON.stringify(me));
+  sub();
+  await refresh();
+}
+
+async function leave() {
+  if (!confirm('Leave this room?')) return;
+  try {
+    if (room.players.length <= 1) {
+      await sb.from('rooms').delete().eq('id', me.code);
+    } else {
+      await mutate(x => {
+        const gone = x.players.find(p => p.name === me.name);
+        if (!gone) return null;
+        let ps = x.players.filter(p => p.name !== gone.name).map(p => p.vote === gone.name ? { ...p, vote: '' } : p);
+        const patch = {};
+        if (gone.isHost) {
+          const nh = rnd(ps).name;
+          ps = ps.map(p => ({ ...p, isHost: p.name === nh }));
+          patch.host_name = nh;
+        }
+        if (gone.name === x.imposter_name && ['reveal', 'discussion', 'voting'].includes(x.phase)) {
+          Object.assign(patch, { phase: 'setup', imposter_name: '', category: '', character: '' });
+          ps = ps.map(p => ({ ...p, role: 'crewmate', vote: '' }));
+        }
+        return { ...patch, players: ps };
+      }, x => !x.players.some(p => p.name === me.name));
+    }
+  } catch {}
+  out('');
+}
+
+/* ---------- host actions ---------- */
+const hostGo = (from, fn) => run(() => mutate(x => {
+  const h = x.players.find(p => p.name === me.name);
+  return h && h.isHost && x.phase === from ? fn(x) : null;
+}));
+
+const actions = {
+  join: () => run(() => join(ui.nm, ui.cd, false)),
+  create: () => run(() => join(ui.nm, ui.cd, true)),
+  refresh: () => run(() => refresh()),
+  copy, leave, peek,
+  cat: v => { ui.cat = v; render(); },
+  pick: v => { ui.sel = v; render(); },
+  start: () => hostGo('lobby', x => x.players.length >= 3 ? { phase: 'setup' } : null),
+  deal: () => hostGo('setup', x => {
+    const pool = x.players.filter(p => !p.isHost);
+    if (!pool.length || !ui.cat || !ui.chr.trim()) return null;
+    const imp = rnd(pool).name;
+    return {
+      phase: 'reveal', imposter_name: imp, category: ui.cat, character: ui.chr.trim(),
+      players: x.players.map(p => ({ ...p, role: p.name === imp ? 'imposter' : 'crewmate', vote: '' }))
+    };
+  }),
+  discuss: () => hostGo('reveal', () => ({ phase: 'discussion' })),
+  tovote: () => hostGo('discussion', () => ({ phase: 'voting' })),
+  results: () => hostGo('voting', x => x.players.every(p => p.vote) ? { phase: 'results' } : null),
+  next: () => hostGo('results', x => {
+    const others = x.players.filter(p => !p.isHost);
+    if (!others.length) return null;
+    const nh = rnd(others).name;
+    return {
+      phase: 'setup', round: x.round + 1, host_name: nh, imposter_name: '', category: '', character: '',
+      players: x.players.map(p => ({ ...p, isHost: p.name === nh, role: 'crewmate', vote: '' }))
+    };
+  }),
+  submit: () => {
+    const pick = ui.sel;
+    return run(() => mutate(x => {
+      const p = x.players.find(p => p.name === me.name);
+      if (x.phase !== 'voting' || !p || p.vote || !x.players.some(q => q.name === pick)) return null;
+      p.vote = pick;
+      return { players: x.players };
+    }, x => x.players.find(p => p.name === me.name)?.vote === pick));
+  }
+};
+
+async function run(fn) {
+  if (busy) return;
+  busy = true; err = ''; render();
+  try { await fn(); } catch (e) { err = e?.message || String(e); }
+  busy = false; render();
+}
+
+async function copy() {
+  const u = location.href.split(/[?#]/)[0] + '?room=' + me.code;
+  try { await navigator.clipboard.writeText(u); } catch { prompt('Copy this link', u); }
+  ui.copied = true; render();
+  setTimeout(() => { ui.copied = false; render(); }, 1800);
+}
+
+function peek() {
+  if (ui.revealed) return hide();
+  ui.revealed = true; ui.left = 10; render();
+  clearInterval(ui.tm);
+  ui.tm = setInterval(() => { if (--ui.left <= 0) hide(); else render(); }, 1000);
+}
+function hide() { clearInterval(ui.tm); ui.revealed = false; render(); }
+
+/* ---------- views ---------- */
+const B = (a, t, o = {}) =>
+  `<button class="btn ${o.c || ''}" data-act="${a}"${o.d || busy ? ' disabled' : ''}>${t}</button>`;
+const errBox = () => err ? `<div class="err">${esc(err)}</div>` : '';
+
+function landing() {
+  return `<div style="margin-top:8vh"><h1>Imposter</h1><p class="mut">A live bluffing game for up to 10 friends.</p></div>
+  ${errBox()}
+  <div class="card">
+    <input id="nm" placeholder="Your username" maxlength="16" autocomplete="off" value="${esc(ui.nm)}">
+    <input id="cd" placeholder="Room code" maxlength="6" autocapitalize="characters" autocomplete="off" value="${esc(ui.cd)}">
+    ${B('join', 'Join room')}
+  </div>
+  ${B('create', 'Create room', { c: 'sec' })}`;
+}
+
+function game() {
+  const R = room, P = R.players, m = P.find(p => p.name === me.name);
+  if (!m) return `<div class="card c">Reconnecting…</div>`;
+
+  const k = R.round + ':' + R.phase;
+  if (k !== ui.key) {
+    if (ui.key.split(':')[0] !== String(R.round)) { ui.cat = ''; ui.chr = ''; }
+    ui.key = k; ui.sel = ''; ui.revealed = false; clearInterval(ui.tm);
+  }
+
+  const host = m.isHost, ph = R.phase, n = P.length, voted = P.filter(p => p.vote).length;
+  const wt = '<p class="mut c">Waiting for the host…</p>';
+  let b = '';
+
+  if (ph === 'lobby') {
+    b = `<div class="card"><div class="h">Players <span class="mut">${n}/10</span></div>${P.map(p =>
+      `<div class="item"><span>${esc(p.name)}${p.name === me.name ? ' <span class="mut">(you)</span>' : ''}</span>${p.isHost ? '<span class="badge">Host</span>' : ''}</div>`).join('')}</div>`
+      + (host ? B('start', 'Start game', { d: n < 3 }) + (n < 3 ? '<p class="mut c">Need at least 3 players</p>' : '') : wt);
+  }
+
+  else if (ph === 'setup') {
+    b = host
+      ? `<div class="card"><div class="h">Pick a category</div>
+          <div class="seg">${CATS.map(c => `<button class="${ui.cat === c ? 'on' : ''}" data-act="cat" data-v="${c}">${c}</button>`).join('')}</div>
+          <input id="chr" placeholder="Character (e.g. Spider-Man)" maxlength="40" autocomplete="off" value="${esc(ui.chr)}"></div>`
+        + B('deal', 'Deal roles', { d: !ui.cat || !ui.chr.trim() })
+      : `<div class="card c"><div class="big">Host is setting up…</div><p class="mut">${esc(R.host_name)} is choosing a category and character.</p></div>`;
+  }
+
+  else if (ph === 'reveal') {
+    const imp = m.role === 'imposter';
+    let face;
+    if (!ui.revealed) face = `<div class="big">Tap to reveal</div><p class="mut">Make sure nobody is peeking.</p>`;
+    else if (imp) face = `<div class="tag bad">Imposter</div><div class="big">You are the Imposter</div><div class="lbl">Category</div><div class="val">${esc(R.category)}</div><p class="mut">You don’t know the character. Blend in.</p><p class="mut">Hides in ${ui.left}s</p>`;
+    else face = `${host ? '<span class="badge">Host</span>' : '<div class="tag">Crewmate</div>'}<div class="lbl">Category</div><div class="val">${esc(R.category)}</div><div class="lbl">Character</div><div class="big">${esc(R.character)}</div><p class="mut">Hides in ${ui.left}s</p>`;
+    b = `<button class="flip ${ui.revealed && imp ? 'imp' : ''}" data-act="peek">${face}</button>`
+      + (host ? B('discuss', 'Start discussion') : wt);
+  }
+
+  else if (ph === 'discussion') {
+    b = `<div class="card c" style="padding:48px 16px"><div class="huge">Talk it out.</div><p class="mut">Describe without giving it away. Who’s bluffing?</p></div>`
+      + (host ? B('tovote', 'Start vote') : wt);
+  }
+
+  else if (ph === 'voting') {
+    const others = P.filter(p => p.name !== me.name);
+    b = (m.vote
+      ? `<div class="card c"><div class="big">Vote locked in ✓</div><p class="mut">You voted for ${esc(m.vote)}</p></div>`
+      : `<div class="card"><div class="h">Who’s the Imposter?</div>${others.map(p =>
+          `<button class="opt ${ui.sel === p.name ? 'on' : ''}" data-act="pick" data-v="${esc(p.name)}"><span>${esc(p.name)}</span>${p.isHost ? '<span class="badge">Host</span>' : ''}</button>`).join('')}</div>`
+        + B('submit', 'Submit vote', { d: !ui.sel }))
+      + `<p class="mut c">${voted} of ${n} votes in.</p>`
+      + (host ? B('results', 'Reveal results', { d: voted < n }) : '');
+  }
+
+  else if (ph === 'results') {
+    const t = {};
+    P.forEach(p => { if (p.vote) t[p.vote] = (t[p.vote] || 0) + 1; });
+    const rows = P.map(p => [p.name, t[p.name] || 0]).sort((a, b) => b[1] - a[1]);
+    const max = rows[0][1], top = rows.filter(r => r[1] === max);
+    const caught = max > 0 && top.length === 1 && top[0][0] === R.imposter_name;
+    b = `<div class="card c"><div class="huge">${caught ? 'Caught 🎉' : 'Got away 😈'}</div>
+          <p>The Imposter was <b>${esc(R.imposter_name)}</b></p>
+          <p class="mut">${esc(R.category)} · ${esc(R.character)}</p></div>
+        <div class="card"><div class="h">Votes</div>${rows.map(([nm, c]) =>
+          `<div class="tl"><div><span>${esc(nm)}${nm === R.imposter_name ? ' 🕵️' : ''}</span><b>${c}</b></div><div class="bar" style="width:${max ? c / max * 100 : 0}%"></div></div>`).join('')}</div>`
+      + (host ? B('next', 'Next round') : wt);
+  }
+
+  return `<div class="top"><div><div class="mut" style="font-size:13px">Room · Round ${R.round}</div><b class="code">${esc(me.code)}</b></div>
+      <button class="btn sec sm" data-act="refresh"${busy ? ' disabled' : ''}>Refresh</button></div>
+    ${errBox()}${b}
+    <div class="foot">${B('copy', ui.copied ? 'Copied ✓' : 'Copy invite link', { c: 'sec' })}<button class="link" data-act="leave">Leave room</button></div>`;
+}
+
+function render() {
+  const f = document.activeElement, fid = f && f.id, pos = f && f.selectionStart;
+  app.innerHTML = me && room ? game() : landing();
+  if (fid) {
+    const e = document.getElementById(fid);
+    if (e) { e.focus(); try { e.setSelectionRange(pos, pos); } catch {} }
+  }
+}
+
+/* ---------- events ---------- */
+app.addEventListener('click', e => {
+  const t = e.target.closest('[data-act]');
+  if (!t || t.disabled) return;
+  const fn = actions[t.dataset.act];
+  if (fn) fn(t.dataset.v);
+});
+app.addEventListener('input', e => {
+  const t = e.target;
+  if (t.id === 'nm') ui.nm = t.value;
+  if (t.id === 'cd') t.value = ui.cd = t.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (t.id === 'chr') {
+    ui.chr = t.value;
+    const d = app.querySelector('[data-act=deal]');
+    if (d) d.disabled = busy || !ui.cat || !ui.chr.trim();
+  }
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { if (ui.revealed) hide(); }
+  else if (me) refresh(true).catch(() => {});
+});
+setInterval(() => { if (me && !document.hidden && !busy) refresh(true).catch(() => {}); }, 5000);
+
+/* ---------- boot ---------- */
+const qp = (new URLSearchParams(location.search).get('room') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+if (qp) ui.cd = qp;
+if (me && me.name && me.code && (!qp || qp === me.code)) {
+  ui.nm = me.name; ui.cd = me.code;
+  run(() => join(me.name, me.code, false));
+} else {
+  if (me) ui.nm = me.name;
+  me = null; render();
+}
+</script>
+</body>
+</html>
